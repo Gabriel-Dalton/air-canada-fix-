@@ -6,6 +6,13 @@ import { ToolCard } from "./Cards";
 import { ModuleBadge } from "./ModuleBadge";
 import type { SkillModule } from "@/lib/store";
 
+interface HealthInfo {
+  ok: boolean;
+  has_anthropic_key: boolean;
+  model: string;
+  setup_hint: string | null;
+}
+
 type AssistantBlock =
   | { kind: "text"; text: string }
   | {
@@ -63,6 +70,7 @@ export function Chat() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [health, setHealth] = useState<HealthInfo | null>(null);
   const [usage, setUsage] = useState<UsageTotals>({
     input_tokens: 0,
     output_tokens: 0,
@@ -77,6 +85,23 @@ export function Chat() {
       behavior: "smooth",
     });
   }, [messages, busy]);
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const res = await fetch("/api/health", { cache: "no-store" });
+        if (!res.ok) return;
+        const json = (await res.json()) as HealthInfo;
+        if (alive) setHealth(json);
+      } catch {
+        // ignore — banner just won't show
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const send = useCallback(
     async (text: string) => {
@@ -99,29 +124,25 @@ export function Chat() {
       setBusy(true);
 
       // Build the API payload from prior messages + the new user turn.
-      const apiMessages = [
-        ...messages
-          .filter((m) => m.blocks.length > 0)
-          .map((m) => {
-            if (m.role === "user") {
-              const t = m.blocks
-                .filter((b): b is { kind: "text"; text: string } => b.kind === "text")
-                .map((b) => b.text)
-                .join("\n");
-              return { role: "user" as const, content: t };
-            }
-            // Send back assistant text only — tool_use blocks would have to be
-            // sent verbatim with their original IDs, which we don't preserve
-            // client-side. The model uses surrounding text + the user's next
-            // message as context. Good enough for a demo.
-            const t = m.blocks
-              .filter((b): b is { kind: "text"; text: string } => b.kind === "text")
-              .map((b) => b.text)
-              .join("\n");
-            return { role: "assistant" as const, content: t || "(tool calls)" };
-          }),
-        { role: "user" as const, content: text },
-      ];
+      // Tool-use blocks aren't preserved across turns client-side (we'd need
+      // their original IDs to send tool_results), so the assistant turns
+      // collapse to plain text. Skip empty assistant turns rather than
+      // injecting a "(tool calls)" placeholder, which confuses the model.
+      const apiMessages: { role: "user" | "assistant"; content: string }[] = [];
+      for (const m of messages) {
+        if (m.blocks.length === 0) continue;
+        const t = m.blocks
+          .filter((b): b is { kind: "text"; text: string } => b.kind === "text")
+          .map((b) => b.text)
+          .join("\n")
+          .trim();
+        if (m.role === "user") {
+          if (t) apiMessages.push({ role: "user", content: t });
+        } else if (t) {
+          apiMessages.push({ role: "assistant", content: t });
+        }
+      }
+      apiMessages.push({ role: "user", content: text });
 
       try {
         const res = await fetch("/api/chat", {
@@ -205,6 +226,14 @@ export function Chat() {
 
   return (
     <div className="flex h-full min-h-[calc(100vh-64px)] flex-col">
+      {health && !health.has_anthropic_key && (
+        <div className="border-b border-ac-amber/40 bg-ac-amber/10 px-4 py-3 text-sm text-ac-amber">
+          <div className="mx-auto max-w-3xl">
+            <strong className="font-semibold">Setup required:</strong>{" "}
+            {health.setup_hint}
+          </div>
+        </div>
+      )}
       <div
         ref={scrollRef}
         className="flex-1 overflow-y-auto px-4 py-6"
