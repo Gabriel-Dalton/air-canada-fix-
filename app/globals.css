@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  background: theme(colors.ac.paper);
+  color: theme(colors.ac.ink);
+}
+
+* {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.prose-citation {
+  @apply text-[11px] uppercase tracking-wider text-ac-muted;
+}
